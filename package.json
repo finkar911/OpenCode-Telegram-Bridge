@@ -4,6 +4,8 @@
   "private": true,
   "type": "module",
   "description": "Telegram sidecar for OpenCode sessions",
+  "license": "MIT",
+  "author": "finkar911",
   "engines": {
     "node": ">=18.16"
   },

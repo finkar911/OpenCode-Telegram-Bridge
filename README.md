@@ -8,6 +8,8 @@ only needs a running OpenCode background service and a Telegram bot.
 
 **Status:** v0.1.0, tested against OpenCode 2.3.2 on Windows.
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
 ```text
 OpenCode service  ⇄  Node.js bridge  ⇄  Telegram Bot API
 ```
@@ -605,7 +607,6 @@ The bridge redacts configured secrets before logging.
 - OpenCode Desktop 2.3.2 may keep a stale model label in its composer after an
   external model switch until the session is reopened (see
   [Model selection](#model-selection)).
-- No license file is currently included in this subproject.
 
 ## File layout
 
@@ -616,6 +617,7 @@ OpenCodeTelegramBridge/
   .env.example       environment template
   README.md          English documentation
   README.ru.md       Russian documentation
+  LICENSE            MIT license
   .gitignore         local env, logs, dependencies
   lib/config.js      env loading, paths, AuthGate, state persistence
   lib/opencode.js    OpenCode HTTP and SSE client
@@ -636,6 +638,6 @@ OpenCodeTelegramBridge/
 
 ## License
 
-No license has been declared for this repository or for this subproject. Add a
-license before redistributing the code outside the repository owner's
-organization.
+Released under the [MIT License](LICENSE).
+
+Copyright (c) 2026 finkar911.

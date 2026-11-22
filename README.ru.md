@@ -481,6 +481,7 @@ OpenCodeTelegramBridge/
   .env.example       шаблон окружения
   README.md          английская документация
   README.ru.md       русская документация
+  LICENSE            лицензия MIT
   .gitignore         локальный env, логи, зависимости
   lib/config.js      env, AuthGate, state
   lib/opencode.js    OpenCode HTTP/SSE клиент
@@ -490,3 +491,9 @@ OpenCodeTelegramBridge/
   lib/bot.js         команды, формы, разрешения, уведомления
   test/*.test.js
 ```
+
+## Лицензия
+
+Проект распространяется по лицензии [MIT](LICENSE).
+
+Copyright (c) 2026 finkar911.
