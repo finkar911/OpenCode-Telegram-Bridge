@@ -119,6 +119,148 @@ test("OpenCodeClient lists models and switches a session model", async () => {
   });
 });
 
+test("OpenCodeClient sums assistant usage since a timestamp", async () => {
+  const calls = [];
+  const client = new OpenCodeClient({
+    url: "http://127.0.0.1:28894",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify({
+          data: [
+            {
+              type: "assistant",
+              cost: 0.5,
+              tokens: { input: 100, output: 10 },
+              time: { created: 2000 },
+            },
+            {
+              type: "assistant",
+              cost: 0.3,
+              tokens: { input: 50, output: 5 },
+              time: { created: 1500 },
+            },
+            {
+              type: "assistant",
+              cost: 9,
+              tokens: { input: 999, output: 99 },
+              time: { created: 500 },
+            },
+          ],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const usage = await client.sessionUsageSince(["ses_1"], 1000);
+
+  assert.equal(usage.cost, 0.8);
+  assert.deepEqual(usage.tokens, { input: 150, output: 15 });
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/session/ses_1/message");
+  assert.equal(url.searchParams.get("type"), "assistant");
+  assert.equal(url.searchParams.get("order"), "desc");
+  assert.equal(url.searchParams.get("limit"), "100");
+});
+
+test("OpenCodeClient reads the project default model", async () => {
+  const calls = [];
+  const client = new OpenCodeClient({
+    url: "http://127.0.0.1:28894",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify({
+          data: { id: "m1", modelID: "m1", providerID: "p1" },
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const model = await client.defaultModel({ directory: "C:\\Projects\\Demo" });
+
+  assert.equal(model.id, "m1");
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/model/default");
+  assert.equal(
+    url.searchParams.get("location[directory]"),
+    "C:\\Projects\\Demo",
+  );
+});
+
+test("OpenCodeClient reads the latest user message time", async () => {
+  const calls = [];
+  const client = new OpenCodeClient({
+    url: "http://127.0.0.1:28894",
+    fetchImpl: async (url, init) => {
+      calls.push({ url, init });
+      return new Response(
+        JSON.stringify({
+          data: [{ type: "user", time: { created: 123456 } }],
+        }),
+        { status: 200 },
+      );
+    },
+  });
+
+  const created = await client.latestUserTime("ses_1");
+
+  assert.equal(created, 123456);
+  const url = new URL(calls[0].url);
+  assert.equal(url.pathname, "/api/session/ses_1/message");
+  assert.equal(url.searchParams.get("type"), "user");
+  assert.equal(url.searchParams.get("limit"), "1");
+  assert.equal(url.searchParams.get("order"), "desc");
+});
+
+test("OpenCodeClient aggregates a session tree including subagents", async () => {
+  const root = {
+    id: "ses_root",
+    cost: 1,
+    tokens: { input: 100, output: 10, reasoning: 5, cache: { read: 1000 } },
+  };
+  const child = {
+    id: "ses_child",
+    parentID: "ses_root",
+    cost: 2,
+    tokens: { input: 200, output: 20, reasoning: 10, cache: { read: 2000 } },
+  };
+  const grandchild = {
+    id: "ses_grandchild",
+    parentID: "ses_child",
+    cost: 3,
+    tokens: { input: 300, output: 30, reasoning: 15, cache: { read: 3000 } },
+  };
+  const client = new OpenCodeClient({
+    url: "http://127.0.0.1:28894",
+    fetchImpl: async (url) => {
+      const parentID = new URL(url).searchParams.get("parentID");
+      const data =
+        parentID === "ses_root"
+          ? [child]
+          : parentID === "ses_child"
+            ? [grandchild]
+            : [];
+      return new Response(JSON.stringify({ data }), { status: 200 });
+    },
+  });
+
+  const tree = await client.sessionTree("ses_root", root);
+
+  assert.equal(tree.cost, 6);
+  assert.deepEqual(tree.tokens, {
+    input: 600,
+    output: 60,
+    reasoning: 30,
+    cache: { read: 6000, write: 0 },
+  });
+  assert.equal(tree.sessions, 3);
+  assert.equal(tree.subagents, 2);
+  assert.deepEqual(tree.activeIDs, ["ses_root", "ses_child", "ses_grandchild"]);
+});
+
 test("OpenCodeClient prompt sends inline file attachments", async () => {
   const calls = [];
   const client = new OpenCodeClient({

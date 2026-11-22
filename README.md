@@ -50,7 +50,7 @@ This bridge adds a Telegram control room on top of that API:
 - you get a message when a task starts, asks a question, needs a permission, or
   finishes;
 - you can answer questions and approve permissions directly from Telegram;
-- you can browse projects and sessions, start new tasks, continue an existing
+- you can browse projects and sessions, start new sessions, continue an existing
   session with a follow-up, and switch the model;
 - you can attach images to a task;
 - you can choose how responses are formatted and whether a full `.md` file is
@@ -68,7 +68,7 @@ port. It uses only Node.js built-ins and has **no npm runtime dependencies**.
 - Actionable tool permissions: allow once, always allow, or reject.
 - Project and session browser with favorites, pagination, status icons, and
   session cards.
-- Create a new task in a project or continue the currently selected session.
+- Create a new session in a project or continue the currently selected session.
 - Per-session model picker with provider, model, and variant selection.
 - Telegram image attachments, including albums, passed to OpenCode as base64
   `files`.
@@ -242,7 +242,7 @@ and the OpenCode SSE stream cleanly.
 | `/menu` | Show the persistent three-button keyboard. Sends a short `⌨️` service message. |
 | `/projects` | List OpenCode projects. |
 | `/sessions` | Favorite sessions; all other sessions live under **All sessions**. |
-| `/new` | Start a new task: choose a project, then send text. |
+| `/new` | Start a new session: choose a project, review or change the model, enter a session name, then the task text. |
 | `/status` | Show the OpenCode version, selected session, PIN state, and language. |
 | `/settings` | Language, response format, attachments, and notification types. |
 | `/lock` | Lock actions immediately. |
@@ -255,7 +255,7 @@ and the OpenCode SSE stream cleanly.
 The persistent keyboard has three buttons:
 
 ```text
-📁 Projects     🕘 Sessions     ➕ New task
+📁 Projects     🕘 Sessions     ➕ New session
 ```
 
 - The buttons send normal text; the bridge recognizes the localized labels and
@@ -268,6 +268,12 @@ The persistent keyboard has three buttons:
 - Telegram cannot combine a reply keyboard and inline buttons in one message.
   `/start` therefore sends the reply keyboard, while inline buttons are used for
   choices: projects, sessions, session cards, settings, and form options.
+
+A session card shows the project, session name, ID, update time, current model,
+last text, and cost. The first cost figure is the total for that session and all
+of its subagent sessions. The **Today** line below it shows today's cost and
+tokens for the same session tree, calculated from assistant-message usage since
+local midnight.
 
 `/menu` needs a non-empty message to install the reply keyboard. Telegram rejects
 empty or invisible text, so the bridge sends a small `⌨️` message and keeps it.
@@ -282,10 +288,12 @@ session title, and task text. If the session is continuing automatically after
 subagents, the message is **Continuing the task** and shows the latest assistant
 text instead of repeating the original task.
 
-### New task vs. continue
+### New session vs. continue
 
-- **New task** creates a separate session in the selected project and sends the
-  text to it.
+- **New session** creates a separate session in the selected project. The flow is:
+  choose a project → review the project's default model and optionally change it
+  → enter the session name → send the task text. The chosen model is applied
+  before the first prompt.
 - **Continue** in a session card sends a follow-up to the same session.
 - The completion card has **Open session** and **Continue**: Continue selects
   that session and immediately asks for the next message.
@@ -445,7 +453,7 @@ can be changed from the card and subsequent tasks use the new model.
 
 Images are accepted in two flows:
 
-- after **New task**, together with the task text;
+- after **New session**, together with the task text;
 - after **Continue**, together with the follow-up.
 
 Behavior:
@@ -457,7 +465,7 @@ Behavior:
 - the limit is 20 MB per image (Telegram Bot API and OpenCode limits);
 - images are sent as `files` with `data:image/...;base64,...` to
   `POST /api/session/{id}/prompt`;
-- without an active New task/Continue flow, an image is rejected with a hint.
+- without an active New session/Continue flow, an image is rejected with a hint.
 
 The selected model must support image input.
 
@@ -495,7 +503,7 @@ icacls "$env:USERPROFILE\.config\opencode\telegram.env" /inheritance:r /grant:r 
 | Task started | `session.execution.started` | Reads the session and the latest user message. |
 | Form question | `form.created` | Renders fields, options, and answer controls. |
 | Permission request | `permission.asked` | Sends allow-once / always / reject buttons. |
-| Completion | `session.execution.succeeded` | Shows the latest assistant text and stats; reports waiting subagents when children are active. |
+| Completion | `session.execution.succeeded` | Shows the latest assistant text and stats for the current task: the latest user message and its subagents, not the session lifetime. |
 | Failure | `session.execution.failed` | Shows the error and stats. |
 | Interruption | `session.execution.interrupted` | Marks the session as interrupted. |
 | Question closed in OpenCode | `form.replied`, `form.cancelled` | Marks the Telegram flow as closed; old buttons report stale. |
@@ -545,7 +553,7 @@ stores the bot token or OpenCode password in the state file.
 ## Testing
 
 The test suite uses fake Telegram and OpenCode clients and never touches the
-network. It currently contains 107 tests.
+network. It currently contains 114 tests.
 
 ```powershell
 npm test

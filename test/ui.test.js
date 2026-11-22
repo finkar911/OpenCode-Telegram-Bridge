@@ -377,12 +377,16 @@ test("session card formats only the last block", () => {
     id: "ses_1",
     title: "Content",
     model: { id: "m", providerID: "p" },
+    cost: 0.0123,
+    tokens: { input: 1200, output: 300 },
     time: { updated: 1 },
   };
   const html = sessionCard({
     project: "Demo",
     session,
     lastText: "**Done** with `code`",
+    dailyCost: 0.0034,
+    dailyTokens: { input: 1000, output: 200 },
     lang: "en",
     format: "html",
   });
@@ -390,6 +394,9 @@ test("session card formats only the last block", () => {
   assert.doesNotMatch(html, /<i>ses/);
   assert.match(html, /<b>Done<\/b>/);
   assert.match(html, /<code>code<\/code>/);
+  assert.match(html, /Cost: \$0\.0123/);
+  assert.match(html, /Today: \$0\.0034 · Tokens: 1\.2k/);
+  assert.doesNotMatch(html, /\(today:/);
 
   const code = sessionCard({
     project: "Demo",
@@ -400,6 +407,25 @@ test("session card formats only the last block", () => {
   });
   assert.match(code, /^<pre><code class="language-markdown">/);
   assert.match(code, /Last:\n\*\*Done\*\*/);
+});
+
+test("session card shows today's tokens when cost is zero", () => {
+  const text = sessionCard({
+    project: "Demo",
+    session: {
+      id: "ses_free",
+      title: "Free model",
+      cost: 0,
+      tokens: { input: 1000, output: 200 },
+      time: { updated: 1 },
+    },
+    dailyCost: 0,
+    dailyTokens: { input: 1000, output: 200 },
+    lang: "ru",
+    format: "plain",
+  });
+  assert.match(text, /Стоимость: \$0\.0000 · Токены: 1\.2k/);
+  assert.match(text, /Сегодня: \$0\.0000 · Токены: 1\.2k/);
 });
 
 test("question notification formats dynamic text and footer", () => {
@@ -660,7 +686,7 @@ test("reply keyboard is one row with the three main actions", () => {
   assert.deepEqual(enLabels, [
     "📁 Projects",
     "🕘 Sessions",
-    "➕ New task",
+    "➕ New session",
   ]);
   assert.equal(en.keyboard.length, 1);
   assert.equal(en.resize_keyboard, true);
@@ -671,7 +697,7 @@ test("reply keyboard is one row with the three main actions", () => {
   assert.deepEqual(ruLabels, [
     "📁 Проекты",
     "🕘 Сессии",
-    "➕ Новая задача",
+    "➕ Новая сессия",
   ]);
 });
 
@@ -771,7 +797,7 @@ test("session list shows status icons and a legend", () => {
   assert.equal(labels[1], "⏳ Waiting");
 });
 
-test("sessionKeyboard routes to the session and its project", () => {
+test("sessionKeyboard routes to the session and the sessions list", () => {
   const keyboard = sessionKeyboard(
     { id: "ses_1", projectID: "p1" },
     "p1",
@@ -780,6 +806,8 @@ test("sessionKeyboard routes to the session and its project", () => {
   assert.ok(data.includes("cont:ses_1"));
   assert.ok(data.includes("new:p1"));
   assert.ok(data.includes("refresh:ses_1"));
+  assert.ok(data.includes("sessions"));
+  assert.ok(!data.includes("projects"));
 });
 
 test("redact removes configured secrets and token-like strings", () => {

@@ -153,6 +153,32 @@ class FakeOpenCode {
     return this.modelList;
   }
 
+  async defaultModel() {
+    return this.modelList[0];
+  }
+
+  async sessionTree() {
+    return {
+      cost: 0.0456,
+      tokens: { input: 2000, output: 400, reasoning: 0, cache: { read: 0, write: 0 } },
+      sessions: 3,
+      subagents: 2,
+      activeIDs: ["ses_1"],
+    };
+  }
+
+  async sessionUsageSince() {
+    return {
+      cost: 0.0034,
+      tokens: { input: 1000, output: 200 },
+      messages: 2,
+    };
+  }
+
+  async latestUserTime() {
+    return Date.now() - 125_000;
+  }
+
   async switchModel(sessionID, model) {
     this.modelSwitches.push({ sessionID, model });
     const session = this.sessionsMap.get(sessionID);
@@ -549,6 +575,10 @@ test("session card formats the last block without attaching a file", async () =>
   const message = tg.messages.at(-1);
   assert.equal(message.options.parseMode, "HTML");
   assert.match(message.text, /<b>Done<\/b> last/);
+  assert.match(message.text, /Cost: \$0\.0456/);
+  assert.match(message.text, /Tokens: 2\.4k/);
+  assert.match(message.text, /Today: \$0\.0034 · Tokens: 1\.2k/);
+  assert.doesNotMatch(message.text, /\(today:/);
   assert.equal(tg.documents.length, 0);
 });
 
@@ -627,12 +657,36 @@ test("completion event sends the latest assistant text and stats", async () => {
   assert.match(message.text, /Итог: succeeded/);
   assert.match(message.text, /Done\. Changed 3 files\./);
   assert.match(message.text, /1\.2k токенов/);
+  assert.match(message.text, /\$0\.0034/);
+  assert.doesNotMatch(message.text, /\$0\.0100/);
+  assert.match(message.text, /2 мин 5 с/);
   assert.doesNotMatch(message.text, /older text/);
   assert.equal(message.options.parseMode, "HTML");
   assert.equal(tg.documents.length, 1);
   assert.match(tg.documents[0].filename, /\.md$/);
   assert.match(tg.documents[0].content, /Done\. Changed 3 files\./);
   assert.equal(tg.documents[0].options.replyTo, message.message_id);
+});
+
+test("completion falls back to the session busy time when start was missed", async () => {
+  const { bot, tg, oc } = setup({ language: "ru" });
+  oc.sessionsMap.get("ses_1").time.busy = Date.now() - 125_000;
+  oc.latestUserTime = async () => null;
+  oc.messagesBySession.set("ses_1", [
+    {
+      type: "assistant",
+      content: [{ type: "text", text: "Finished after a restart." }],
+    },
+    { type: "user", text: "Task" },
+  ]);
+
+  await bot.handleEvent({
+    type: "session.execution.succeeded",
+    data: { sessionID: "ses_1" },
+  });
+
+  assert.match(tg.messages.at(-1).text, /2 мин 5 с/);
+  assert.match(tg.messages.at(-1).text, /Finished after a restart\./);
 });
 
 test("completion continue button starts a prompt in the same session", async () => {
@@ -942,10 +996,13 @@ test("required text fields reject /skip", async () => {
 test("slash text is accepted as a task when a task input is pending", async () => {
   const { bot, oc } = setup();
   await bot.handleUpdate(ownerCallback("new:p1"));
+  await bot.handleUpdate(ownerCallback("newtitle:p1"));
+  await bot.handleUpdate(ownerMessage("Logs"));
   await bot.handleUpdate(ownerMessage("/var/log/app.log"));
 
   assert.equal(oc.created.length, 1);
-  assert.equal(oc.created[0].title, "/var/log/app.log");
+  assert.equal(oc.created[0].title, "Logs");
+  assert.equal(oc.promptCalls[0].text, "/var/log/app.log");
 });
 
 test("project list deduplicates legacy projects with the same path", async () => {
@@ -1055,22 +1112,79 @@ test("project session list shows the latest status icon per session", async () =
   assert.ok(labels.includes("❌ Failed session"));
 });
 
-test("new task callback creates a session and sends the prompt", async () => {
+test("new task asks for model, session name, then task text", async () => {
   const { bot, tg, oc, state } = setup();
 
   await bot.handleUpdate(ownerCallback("new:p1"));
-  assert.equal(bot.pending.kind, "task");
+  assert.equal(bot.pending.kind, "taskModel");
+  assert.match(tg.messages.at(-1).text, /Новая сессия/);
+  assert.match(tg.messages.at(-1).text, /Модель:/);
+  assert.match(tg.messages.at(-1).text, /по умолчанию/);
+
+  await bot.handleUpdate(ownerCallback("newtitle:p1", "title"));
+  assert.equal(bot.pending.kind, "taskTitle");
+  assert.equal(tg.messages.at(-1).options.forceReply, "Название сессии");
+
+  await bot.handleUpdate(ownerMessage("My session"));
+  assert.equal(bot.pending.kind, "taskText");
   assert.equal(tg.messages.at(-1).options.forceReply, "Опишите задачу");
 
   await bot.handleUpdate(ownerMessage("Implement feature X"));
   assert.equal(oc.created.length, 1);
   assert.equal(oc.created[0].directory, "C:\\Projects\\Demo");
-  assert.equal(oc.created[0].title, "Implement feature X");
+  assert.equal(oc.created[0].title, "My session");
   assert.deepEqual(oc.promptCalls, [
     { sessionID: oc.created[0].session.id, text: "Implement feature X" },
   ]);
+  assert.deepEqual(oc.modelSwitches, [
+    {
+      sessionID: oc.created[0].session.id,
+      model: {
+        id: "deepseek/deepseek-v4.1-flash",
+        providerID: "commandcode",
+      },
+    },
+  ]);
   assert.equal(state.activeSessionID, oc.created[0].session.id);
   assert.match(tg.messages.at(-1).text, /Задача поставлена/);
+});
+
+test("new task model can be replaced before the session is created", async () => {
+  const { bot, tg, oc } = setup();
+  const buttons = () =>
+    (tg.editTexts.at(-1)?.options.keyboard ??
+      tg.messages.at(-1).options.keyboard).inline_keyboard.flat();
+
+  await bot.handleUpdate(ownerCallback("new:p1"));
+  const change = buttons().find((button) =>
+    String(button.callback_data).startsWith("model:draft_"),
+  );
+  assert.ok(change);
+
+  await bot.handleUpdate(ownerCallback(change.callback_data, "draft-model"));
+  const provider = buttons().find((button) =>
+    String(button.text).includes("commandcode"),
+  );
+  assert.ok(provider);
+  await bot.handleUpdate(ownerCallback(provider.callback_data, "draft-provider"));
+
+  const model = buttons().find((button) =>
+    String(button.text).includes("GPT-6 Sol"),
+  );
+  assert.ok(model);
+  await bot.handleUpdate(ownerCallback(model.callback_data, "draft-choice"));
+  assert.equal(bot.pending.kind, "taskModel");
+  assert.equal(bot.pending.model.id, "gpt-6-sol");
+  assert.equal(bot.pending.isDefault, false);
+
+  await bot.handleUpdate(ownerCallback("newtitle:p1", "draft-title"));
+  await bot.handleUpdate(ownerMessage("GPT session"));
+  await bot.handleUpdate(ownerMessage("Use the chosen model"));
+  assert.equal(oc.created[0].title, "GPT session");
+  assert.deepEqual(oc.modelSwitches.at(-1), {
+    sessionID: oc.created[0].session.id,
+    model: { id: "gpt-6-sol", providerID: "commandcode" },
+  });
 });
 
 test("start installs a persistent reply keyboard with bot actions", async () => {
@@ -1085,7 +1199,7 @@ test("start installs a persistent reply keyboard with bot actions", async () => 
   assert.deepEqual(labels, [
     "📁 Projects",
     "🕘 Sessions",
-    "➕ New task",
+    "➕ New session",
   ]);
 
   await bot.handleUpdate(ownerMessage("⚙️ Settings"));
@@ -1104,7 +1218,7 @@ test("/menu shows the three-button keyboard with a short service message", async
     message.options.replyKeyboard.keyboard
       .flat()
       .map((button) => button.text),
-    ["📁 Projects", "🕘 Sessions", "➕ New task"],
+    ["📁 Projects", "🕘 Sessions", "➕ New session"],
   );
 });
 
@@ -1155,7 +1269,7 @@ test("defaults to English and settings switch the bot to Russian", async () => {
     reply.options.replyKeyboard.keyboard
       .flat()
       .map((button) => button.text),
-    ["📁 Проекты", "🕘 Сессии", "➕ Новая задача"],
+    ["📁 Проекты", "🕘 Сессии", "➕ Новая сессия"],
   );
 });
 
@@ -1446,9 +1560,12 @@ test("favorite button toggles and persists the session", async () => {
 test("new task can include a Telegram image", async () => {
   const { bot, tg, oc } = setup({ language: "en" });
   await bot.handleUpdate(ownerCallback("new:p1"));
+  await bot.handleUpdate(ownerCallback("newtitle:p1"));
+  await bot.handleUpdate(ownerMessage("Image task"));
   await bot.handleUpdate(ownerPhoto("Inspect this", 42));
 
   assert.equal(oc.created.length, 1);
+  assert.equal(oc.created[0].title, "Image task");
   assert.equal(oc.promptCalls[0].text, "Inspect this");
   const files = oc.promptCalls[0].files;
   assert.equal(files.length, 1);
@@ -1480,12 +1597,15 @@ test("image without an active task flow is rejected", async () => {
 test("photo album is attached as multiple images to one task", async () => {
   const { bot, oc } = setup({ language: "en" });
   await bot.handleUpdate(ownerCallback("new:p1"));
+  await bot.handleUpdate(ownerCallback("newtitle:p1"));
+  await bot.handleUpdate(ownerMessage("Album task"));
   await bot.handleUpdate(ownerPhoto("Album", 51, "group-1"));
   await bot.handleUpdate(ownerPhoto("", 52, "group-1"));
   assert.equal(oc.created.length, 0);
 
   await bot.flushMediaGroup("group-1");
   assert.equal(oc.created.length, 1);
+  assert.equal(oc.created[0].title, "Album task");
   assert.equal(oc.promptCalls[0].text, "Album");
   assert.equal(oc.promptCalls[0].files.length, 2);
 });
