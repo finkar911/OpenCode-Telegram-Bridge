@@ -1,0 +1,22 @@
+# Local environment and credentials
+.env
+.env.*
+!.env.example
+
+# Persistent state when TELEGRAM_STATE_FILE points into the repo
+state.json
+*.state.json
+
+# Logs
+*.log
+logs/
+
+# Dependencies and coverage
+node_modules/
+coverage/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
