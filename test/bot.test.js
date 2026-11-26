@@ -334,6 +334,23 @@ function ownerPhoto(caption = "", id = 1, mediaGroupID = null) {
   return { update_id: id, message };
 }
 
+function ownerDocument(fileName, mimeType, id = 1, caption = "") {
+  const message = {
+    message_id: id,
+    from: { id: 1 },
+    chat: { id: 1, type: "private" },
+    document: {
+      file_id: `document_${id}`,
+      file_unique_id: `unique_doc_${id}`,
+      file_name: fileName,
+      mime_type: mimeType,
+      file_size: 4,
+    },
+  };
+  if (caption) message.caption = caption;
+  return { update_id: id, message };
+}
+
 function ownerCallback(data, id = "cb") {
   return {
     update_id: 99,
@@ -1575,6 +1592,25 @@ test("new task can include a Telegram image", async () => {
   assert.match(tg.messages.at(-1).text, /Images: 1/);
 });
 
+test("new task can include a document file", async () => {
+  const { bot, tg, oc } = setup({ language: "en" });
+  await bot.handleUpdate(ownerCallback("new:p1"));
+  await bot.handleUpdate(ownerCallback("newtitle:p1"));
+  await bot.handleUpdate(ownerMessage("Document task"));
+  await bot.handleUpdate(ownerDocument("notes.txt", "text/plain", 42));
+
+  assert.equal(oc.created.length, 1);
+  assert.equal(oc.created[0].title, "Document task");
+  assert.equal(oc.promptCalls[0].text, "Review the attached file.");
+  const files = oc.promptCalls[0].files;
+  assert.equal(files.length, 1);
+  assert.match(files[0].uri, /^data:text\/plain;base64,/);
+  assert.equal(files[0].name, "notes.txt");
+  assert.equal(files[0].description, "File attached from Telegram");
+  assert.equal(tg.getFileCalls[0], "document_42");
+  assert.match(tg.messages.at(-1).text, /Files: 1/);
+});
+
 test("continuing a session can include a Telegram image", async () => {
   const { bot, oc } = setup({ language: "en" });
   await bot.handleUpdate(ownerCallback("cont:ses_1"));
@@ -1591,7 +1627,7 @@ test("image without an active task flow is rejected", async () => {
   await bot.handleUpdate(ownerPhoto("", 44));
 
   assert.equal(oc.promptCalls.length, 0);
-  assert.match(tg.messages.at(-1).text, /Attach images/);
+  assert.match(tg.messages.at(-1).text, /Attach files or images/);
 });
 
 test("photo album is attached as multiple images to one task", async () => {

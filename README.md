@@ -30,7 +30,7 @@ OpenCode service  ⇄  Node.js bridge  ⇄  Telegram Bot API
 - [Session statuses](#session-statuses)
 - [Notifications](#notifications)
 - [Model selection](#model-selection)
-- [Images](#images)
+- [Files and images](#files-and-images)
 - [Security](#security)
 - [How events are handled](#how-events-are-handled)
 - [Project and session filtering](#project-and-session-filtering)
@@ -70,8 +70,8 @@ port. It uses only Node.js built-ins and has **no npm runtime dependencies**.
   session cards.
 - Create a new session in a project or continue the currently selected session.
 - Per-session model picker with provider, model, and variant selection.
-- Telegram image attachments, including albums, passed to OpenCode as base64
-  `files`.
+- Telegram image and document attachments, including photo albums, passed to
+  OpenCode as base64 `files`.
 - Three response formats: formatted HTML, whole-message Markdown code block, or
   plain text.
 - Optional full-result `.md` attachments for every notification type.
@@ -449,25 +449,32 @@ can be changed from the card and subsequent tasks use the new model.
 > may switch the session back to the model selected in its composer, so refresh
 > the session before steering from Desktop.
 
-## Images
+## Files and images
 
-Images are accepted in two flows:
+Files and images are accepted in two flows:
 
 - after **New session**, together with the task text;
 - after **Continue**, together with the follow-up.
 
 Behavior:
 
-- a Telegram photo caption becomes the task text; without a caption the bridge
-  sends a default instruction to analyze the attached image;
-- Telegram photos and documents with MIME `image/*` are supported;
-- an album is buffered into one task/message;
-- the limit is 20 MB per image (Telegram Bot API and OpenCode limits);
-- images are sent as `files` with `data:image/...;base64,...` to
-  `POST /api/session/{id}/prompt`;
-- without an active New session/Continue flow, an image is rejected with a hint.
+- a Telegram photo or document caption becomes the task text; without a caption
+  the bridge sends a default instruction to analyze the image or review the
+  file;
+- Telegram photos, image documents, and arbitrary document files are accepted;
+- photo albums are buffered into one task/message; documents are attached
+  individually;
+- the limit is 20 MB per attachment (Telegram Bot API download and OpenCode
+  prompt limits);
+- attachments are sent as `files` with
+  `data:<mime>;base64,...` to `POST /api/session/{id}/prompt`;
+- without an active New session/Continue flow, a file is rejected with a hint.
 
-The selected model must support image input.
+Images are native multimodal input when the selected model supports them. Other
+files are delivered to OpenCode as attachments; whether the agent can interpret
+the content depends on the file type, the model, and OpenCode's extraction
+support. Plain text, Markdown, code, and PDFs are the most useful formats;
+arbitrary binary files may be stored but not understood by the model.
 
 ## Security
 
@@ -553,7 +560,7 @@ stores the bot token or OpenCode password in the state file.
 ## Testing
 
 The test suite uses fake Telegram and OpenCode clients and never touches the
-network. It currently contains 114 tests.
+network. It currently contains 115 tests.
 
 ```powershell
 npm test
@@ -604,8 +611,9 @@ The bridge redacts configured secrets before logging.
   and finish messages for that run.
 - Forms and permissions live in memory. After a restart, old inline buttons
   cannot be answered.
-- Text and images are supported. Voice messages and arbitrary non-image files are
-  not forwarded to OpenCode.
+- Text, images, and Telegram document files are supported. Voice, video, audio,
+  and stickers are not forwarded. Whether a document is useful depends on its
+  type, the model, and OpenCode's extraction support.
 - One owner only; there are no roles or multi-user access controls.
 - The completion summary is the latest assistant text, not a separate
   summarization pass. The chat preview can be truncated; the `.md` attachment
